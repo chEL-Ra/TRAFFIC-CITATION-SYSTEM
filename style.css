@@ -1,0 +1,101 @@
+/* Body and General Layout */
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background-color: #f5f7fa;
+    margin-bottom: 50px;
+}
+
+/* Buttons */
+.btn-primary, .btn-success, .btn-danger, .btn-secondary {
+    font-weight: bold;
+    border-radius: 0.3rem;
+}
+
+/* Cards */
+.card {
+    border-radius: 0.5rem;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+}
+
+/* Clickable cards */
+.clickable-card:hover {
+    cursor: pointer;
+    background-color: #e9ecef !important;
+}
+
+/* Tables */
+table {
+    background-color: #fff;
+    border-radius: 0.5rem;
+    overflow: hidden;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+}
+
+table th {
+    background-color: #007bff;
+    color: #fff;
+}
+
+table td, table th {
+    vertical-align: middle !important;
+}
+
+table tr:nth-child(even) {
+    background-color: #f8f9fa;
+}
+
+/* Forms */
+input, select, textarea {
+    border-radius: 0.3rem;
+}
+
+.form-label {
+    font-weight: 500;
+}
+
+/* Alerts */
+.alert {
+    border-radius: 0.3rem;
+}
+
+/* Header Links */
+.navbar {
+    background-color: #007bff;
+    color: #fff;
+    padding: 0.8rem 1rem;
+    border-radius: 0.5rem;
+}
+
+.navbar a {
+    color: #fff;
+    margin-right: 1rem;
+    text-decoration: none;
+}
+
+.navbar a:hover {
+    text-decoration: underline;
+}
+
+/* Chart */
+canvas {
+    background-color: #fff;
+    padding: 15px;
+    border-radius: 0.5rem;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+}
+
+/* Footer */
+footer {
+    margin-top: 50px;
+    padding: 20px 0;
+    background-color: #007bff;
+    color: #fff;
+    text-align: center;
+    border-radius: 0.3rem;
+}
