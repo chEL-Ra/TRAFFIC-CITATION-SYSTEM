@@ -4,19 +4,26 @@ if(!isset($_SESSION['SESS_MEMBER_ID'])) header("Location: login.php");
 require 'db.php';
 
 // Stats
-$total_offenses = $pdo->query("SELECT COUNT(*) FROM citations")->fetchColumn();
+$total_offenses = $pdo->query("SELECT COUNT(*) FROM citations WHERE is_deleted = 0")->fetchColumn();
 
-// Total paid fines
+// 2. Paid Fines (Successfully settled)
 $total_paid = $pdo->query("
     SELECT COUNT(DISTINCT p.tct_no) 
     FROM payments p
     INNER JOIN citations c ON p.tct_no = c.tct_no 
-    WHERE p.status = 'Paid'
+    WHERE p.status = 'Paid' AND c.is_deleted = 0
 ")->fetchColumn();
 
-// Total unpaid fines - Ensure this matches your view logic
-$total_unpaid = $total_offenses - $total_paid; //
+// 3. Contested Cases (Assuming 'Contested' is a status in your citations table)
+$total_contested = $pdo->query("
+    SELECT COUNT(*) 
+    FROM citations 
+    WHERE status = 'Contested' AND is_deleted = 0
+")->fetchColumn();
 
+// 4. Pending Fines (Total - Paid - Contested)
+// This ensures "Pending" only shows cases that are neither paid nor under dispute.
+$total_pending = $total_offenses - $total_paid - $total_contested;
 // Determine current page
 $page = $_GET['page'] ?? 'home';
 
@@ -99,31 +106,41 @@ body { background:#eef1f5; font-family:'Segoe UI',sans-serif; margin:0; }
             <div class="row g-4">
 
     <!-- Total Offenses -->
-    <div class="col-md-4">
-        <div class="stat-card card-total">
-            <div class="fw-semibold">Total Offenses</div>
-            <div class="stat-number" data-target="<?= $total_offenses ?>">
-                <?= $total_offenses ?>
+    <div class="dashboard-metrics-container">
+    <div class="row">
+        <div class="col-md-3">
+            <div class="metric-box total-offenses">
+                <div class="metric-info">
+                    <h5>TOTAL OFFENSES</h5>
+                    <h3><?php echo number_format($total_offenses); ?></h3>
+                </div>
             </div>
         </div>
-    </div>
 
-    <!-- Unpaid Fines -->
-    <div class="col-md-4">
-        <div class="stat-card card-unpaid">
-            <div class="fw-semibold">Unpaid Fines</div>
-            <div class="stat-number" data-target="<?= $total_unpaid ?>">
-                <?= $total_unpaid ?>
+        <div class="col-md-3">
+            <div class="metric-box pending-fines">
+                <div class="metric-info">
+                    <h5>PENDING FINES</h5>
+                    <h3><?php echo number_format($total_pending); ?></h3>
+                </div>
             </div>
         </div>
-    </div>
 
-    <!-- Paid Fines -->
-    <div class="col-md-4">
-        <div class="stat-card card-paid">
-            <div class="fw-semibold">Paid Fines</div>
-            <div class="stat-number" data-target="<?= $total_paid ?>">
-                <?= $total_paid ?>
+        <div class="col-md-3">
+            <div class="metric-box paid-fines">
+                <div class="metric-info">
+                    <h5>PAID FINES</h5>
+                    <h3><?php echo number_format($total_paid); ?></h3>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-3">
+            <div class="metric-box contested-cases">
+                <div class="metric-info">
+                    <h5>CONTESTED</h5>
+                    <h3><?php echo number_format($total_contested); ?></h3>
+                </div>
             </div>
         </div>
     </div>

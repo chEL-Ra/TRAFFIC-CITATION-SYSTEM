@@ -23,24 +23,24 @@ $search       = $_GET['search']       ?? '';
 $sql = "SELECT c.*, 
         p.status AS p_status, p.or_number, 
         o.name AS officer_name,
-        -- CONCAT_WS automatically handles empty/NULL fields correctly
+        -- Address Logic
         CONCAT_WS(', ', 
-            NULLIF(c.apprehension_barangay, ''), 
+            NULLIF(TRIM(c.apprehension_barangay), ''), 
             NULLIF(c.apprehension_municipality, ''), 
             NULLIF(c.apprehension_province, '')
         ) AS place_apprehension,
-        vt.type_name AS vehicle_type, 
-        vm.model_name AS vehicle_model, 
-        vb.brand_name AS vehicle_brand
+        
+        COALESCE(vt.type_name, NULLIF(c.vehicle_type_other, ''), 'N/A') AS display_type, 
+        COALESCE(vb.brand_name, NULLIF(c.vehicle_brand_other, ''), 'N/A') AS display_brand, 
+        COALESCE(vm.model_name, NULLIF(c.vehicle_model_other, ''), 'N/A') AS display_model
+
         FROM citations c
         LEFT JOIN payments p ON c.tct_no = p.tct_no
         LEFT JOIN officers o ON c.officer_id = o.id
         LEFT JOIN vehicle_types vt ON c.vehicle_type = vt.id
         LEFT JOIN vehicle_models vm ON c.vehicle_model = vm.id
-        LEFT JOIN vehicle_brands vb ON vm.brand_id = vb.id
+        LEFT JOIN vehicle_brands vb ON vm.brand_id = vb.id -- Brand linked via Model ID
         WHERE 1=1";
-
-
 $params = [];
 
 if ($report_type === 'settled') $sql .= " AND p.status = 'Paid'";
@@ -137,37 +137,30 @@ echo '<tr style="background-color: #004d00; color: #ffffff; text-align:center; f
       </tr>';
 
 // --- DATA ROWS ---
-foreach($rows as $row){
-
-    $status = ($row['p_status']=='Paid') ? 'Settled':'Unsettled';
-
-    $driver = htmlspecialchars($row['driver_fn'].' '.$row['driver_ln']);
-    $owner = trim(($row['owner_fn'] ?? '').' '.($row['owner_ln'] ?? '')) ?: 'N/A';
-    $owner = htmlspecialchars($owner);
-
-    $vehicle_type  = htmlspecialchars($row['vehicle_type'] ?? '');
-    $vehicle_model = htmlspecialchars($row['vehicle_model'] ?? '');
-    $vehicle_brand = htmlspecialchars($row['vehicle_brand'] ?? '');
-
+// --- DATA ROWS ---
+foreach($rows as $row) 
+    // 1. Initialize variables with fallback values to prevent "Undefined" warnings
+    $status = ($row['p_status'] == 'Paid') ? 'Settled' : 'Unsettled';
     $or_number = htmlspecialchars($row['or_number'] ?? '---');
-    $place_apprehension = htmlspecialchars($row['place_apprehension'] ?? 'N/A');
-    if (empty(trim($place_apprehension))) {
-    $place_apprehension = 'N/A';
-  }
-
     
-    // Fetch multiple violations for this citation
-     $stmt_v = $pdo->prepare("SELECT violation_name FROM ticket_violations WHERE tct_no=?");
+    // Use the alias names from the SQL COALESCE logic
+    foreach($rows as $row) {
+    $vehicle_type  = htmlspecialchars($row['display_type']);
+    $vehicle_brand = htmlspecialchars($row['display_brand']);
+    $vehicle_model = htmlspecialchars($row['display_model']);
+
+    $place_apprehension = !empty($row['place_apprehension']) ? htmlspecialchars($row['place_apprehension']) : 'N/A';
+    $driver = htmlspecialchars(($row['driver_fn'] ?? '') . ' ' . ($row['driver_ln'] ?? ''));
+    $owner = trim(($row['owner_fn'] ?? '') . ' ' . ($row['owner_ln'] ?? '')) ?: 'N/A';
+
+    // 2. Violation Fetching
+    $stmt_v = $pdo->prepare("SELECT violation_name FROM ticket_violations WHERE tct_no = ?");
     $stmt_v->execute([$row['tct_no']]);
     $violations = $stmt_v->fetchAll(PDO::FETCH_COLUMN);
+    $violation_text = $violations ? htmlspecialchars(implode("; ", $violations)) : 'N/A';
 
-    $violation_text = '';
-    if ($violations) {
-        $violation_text = htmlspecialchars(implode("; ", $violations));
-    } else {
-        $violation_text = htmlspecialchars($row['specific_violation'] ?? 'N/A');
-    }
-     echo "<tr>
+    // 3. Print Table Row
+    echo "<tr>
             <td align='center'>".date('M d, Y', strtotime($row['date_apprehension']))."</td>
             <td align='center'>".date('h:i A', strtotime($row['time_apprehension']))."</td>
             <td align='center' style='mso-number-format:\"\\@\";'>".htmlspecialchars($row['tct_no'])."</td>
@@ -177,10 +170,10 @@ foreach($rows as $row){
             <td>{$vehicle_type}</td>
             <td>{$vehicle_model}</td>
             <td>{$vehicle_brand}</td>
-            <td>{$owner}</td>
+            <td>".htmlspecialchars($owner)."</td>
             <td>{$violation_text}</td>
-            <td>".htmlspecialchars($row['officer_name'])."</td>
-            <td align='center'>".htmlspecialchars($row['officer_id'])."</td>
+            <td>".htmlspecialchars($row['officer_name'] ?? 'N/A')."</td>
+            <td align='center'>".htmlspecialchars($row['officer_id'] ?? 'N/A')."</td>
             <td align='center' style='font-weight:bold; color:".($status=='Settled'?'#006400':'#8B0000').";'>{$status}</td>
             <td align='center' style='mso-number-format:\"\\@\";'>{$or_number}</td>
           </tr>";

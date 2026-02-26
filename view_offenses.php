@@ -237,6 +237,13 @@ $offenses = $stmt->fetchAll(PDO::FETCH_ASSOC);
                         <small class="text-muted d-block">Plate Number</small><p id="v_plate" class="fw-bold"></p>
                         <small class="text-muted d-block">Model / Type</small><p id="v_vehicle" class="fw-bold"></p>
                     </div>
+                    <div class="column">
+            <h3>📍 Location Snapshot</h3>
+            <img src="https://static-maps.yandex.ru/1.x/?lang=en_US&ll=<?= $row['longitude']; ?>,<?= $row['latitude']; ?>&z=16&l=map&pt=<?= $row['longitude']; ?>,<?= $row['latitude']; ?>,pm2rdl" 
+             alt="Map Location" 
+             style="width:100%; max-width:500px; border-radius:12px; border:1px solid #ddd; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">  
+    <p><strong>Coordinates:</strong> <?= $row['latitude']; ?>, <?= $row['longitude']; ?></p>
+</div>
                     <div class="col-12">
                         <h6 class="text-primary border-bottom pb-1">Violation Details</h6>
                         <div class="row">

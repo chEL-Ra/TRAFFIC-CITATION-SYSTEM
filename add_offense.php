@@ -289,6 +289,20 @@ input, textarea {
     background: #d4edda;
     color: #155724;
 }
+#other_vehicle_container {
+    background-color: #f8f9fa;
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px dashed #ccc;
+}
+
+#other_vehicle_details {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    text-transform: uppercase; /* Keeps it consistent with your other fields */
+}
 </style>
 </head>
 
@@ -343,22 +357,59 @@ input, textarea {
     </div>
 
     <div class="section-separator">
-        <h5>Vehicle Info</h5>
-        <div class="form-group"><label>Plate No:</label><input type="text" name="plate_no" class="full-input"></div>
-        <div class="form-group">
-            <label>Type / Brand / Model:</label>
-            <div class="name-group">
-                <select id="vehicle_type" name="vehicle_type" style="width:115px">
-                    <option value="">Type</option>
-                    <?php foreach($pdo->query("SELECT * FROM vehicle_types ORDER BY type_name ASC") as $t) echo "<option value='{$t['id']}'>{$t['type_name']}</option>"; ?>
-                </select>
-                <select id="vehicle_brand" name="vehicle_brand" style="width:115px" disabled><option value="">Brand</option></select>
-                <select id="vehicle_model" name="vehicle_model" style="width:115px" disabled><option value="">Model</option></select>
-            </div>
+    <h5>Vehicle Info</h5>
+    <div class="form-group"><label>Plate No:</label><input type="text" name="plate_no" class="full-input"></div>
+    <div class="form-group">
+        <label>Type / Brand / Model:</label>
+        <div class="name-group">
+            <select id="vehicle_type" name="vehicle_type" style="width:115px">
+                <option value="">Type</option>
+                <?php foreach($pdo->query("SELECT * FROM vehicle_types ORDER BY type_name ASC") as $t) echo "<option value='{$t['id']}'>{$t['type_name']}</option>"; ?>
+                <option value="0">OTHERS</option> </select>
+            <select id="vehicle_brand" name="vehicle_brand" style="width:115px" disabled><option value="">Brand</option></select>
+            <select id="vehicle_model" name="vehicle_model" style="width:115px" disabled><option value="">Model</option></select>
         </div>
     </div>
 </div>
 
+<div id="other_vehicle_container" style="display: none;">
+    <div class="section-separator">
+        <h5 style="color: #d00000;">Specify Vehicle Details</h5>
+        <div class="place-horizontal-row">
+            <div class="field-container">
+                <label>Manual Type</label>
+                <input type="text" id="vehicle_type_other" name="vehicle_type_other" placeholder="e.g. E-Bike">
+            </div>
+            <div class="field-container">
+                <label>Manual Brand</label>
+                <input type="text" id="vehicle_brand_other" name="vehicle_brand_other" placeholder="e.g. NWOW">
+            </div>
+            <div class="field-container">
+                <label>Manual Model</label>
+                <input type="text" id="vehicle_model_other" name="vehicle_model_other" placeholder="e.g. ERV">
+            </div>
+        </div>
+    </div>
+</div><div id="other_vehicle_container" style="display: none;">
+    <div class="section-separator">
+        <h5 style="color: #d00000;">Specify Vehicle Details</h5>
+        <div class="place-horizontal-row">
+            <div class="field-container">
+                <label>Manual Type</label>
+                <input type="text" name="vehicle_type_other" id="vehicle_type_other" placeholder="e.g. E-Bike">
+            </div>
+            <div class="field-container">
+                <label>Manual Brand</label>
+                <input type="text" name="vehicle_brand_other" id="vehicle_brand_other" placeholder="e.g. NWOW">
+            </div>
+            <div class="field-container">
+                <label>Manual Model</label>
+                <input type="text" name="vehicle_model_other" id="vehicle_model_other" placeholder="e.g. ERV">
+            </div>
+        </div>
+    </div>
+</div>
+</div>
 <!-- OWNER -->
 <div class="column">
     <h3>Registered Owner</h3>
@@ -574,6 +625,7 @@ document.addEventListener("DOMContentLoaded", function() {
         });
     }
 
+
     function setMarker(lat, lng) {
         currentLat = lat;
         currentLng = lng;
@@ -660,7 +712,6 @@ const processChange = debounce(() => updateMapFromFields());
 ['app_street', 'app_barangay', 'app_municipality', 'app_province'].forEach(id => {
     document.getElementById(id).addEventListener('input', processChange);
 });
-
     function reverseGeocode(lat, lng) {
         const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`;
         
@@ -768,26 +819,86 @@ const processChange = debounce(() => updateMapFromFields());
 
     // 2. Helper Functions
     function checkDuplicateViolations() {
-        const selects = document.querySelectorAll('select[name="violations[]"]');
-        const selectedValues = [];
-        for (let select of selects) {
-            if (select.value !== "") {
-                if (selectedValues.includes(select.value)) {
-                    Swal.fire('Duplicate', 'This violation has already been selected.', 'warning');
-                    select.value = "";
-                    return false;
-                }
+    const selects = document.querySelectorAll('select[name="violations[]"]');
+    const selectedValues = [];
+
+    selects.forEach(select => {
+        if (select.value !== "") {
+            if (selectedValues.includes(select.value)) {
+                // Show the alert
+                Swal.fire({
+                    title: 'Duplicate Violation',
+                    text: 'This violation has already been selected for this ticket.',
+                    icon: 'warning',
+                    confirmButtonColor: '#1d3557'
+                });
+                // Reset the duplicate dropdown
+                select.value = "";
+            } else {
                 selectedValues.push(select.value);
             }
         }
-        return true;
-    }
+    });
+}
 
-    function attachViolationListener(selectElement) {
-        if (selectElement) {
-            selectElement.addEventListener('change', checkDuplicateViolations);
-        }
+// Inside your DOMContentLoaded listener
+const otherContainer = document.getElementById('other_vehicle_container');
+const otherInput = document.getElementById('other_vehicle_details');
+
+// Function to toggle visibility
+function toggleOtherField() {
+    const isOtherType = vehicleTypeSelect.value === "0" || vehicleTypeSelect.value === "OTHERS";
+    const isOtherBrand = vehicleBrandSelect.value === "0" || vehicleBrandSelect.value === "OTHERS";
+    const isOtherModel = vehicleModelSelect.value === "0" || vehicleModelSelect.value === "OTHERS";
+
+    // Show container if ANY of them are "Others"
+    if (isOtherType || isOtherBrand || isOtherModel) {
+        otherContainer.style.display = 'block';
+    } else {
+        otherContainer.style.display = 'none';
+        // Clear values if hidden to avoid accidental data
+        document.getElementsByName('vehicle_type_other')[0].value = "";
+        document.getElementsByName('vehicle_brand_other')[0].value = "";
+        document.getElementsByName('vehicle_model_other')[0].value = "";
     }
+}
+[vehicleTypeSelect, vehicleBrandSelect, vehicleModelSelect].forEach(select => {
+    if (select) {
+        select.addEventListener('change', toggleOtherField);
+    }
+});
+// Attach to your existing change listeners
+if (vehicleTypeSelect) {
+    vehicleTypeSelect.addEventListener('change', function() {
+        fetch(`get_brands.php?type_id=${this.value}`)
+            .then(res => res.text())
+            .then(data => {
+                vehicleBrandSelect.innerHTML = data;
+                vehicleBrandSelect.disabled = false;
+                toggleOtherField(); // Re-check after list updates
+            });
+    });
+}
+
+// Also check Brand/Model if "Others" can appear there
+[vehicleBrandSelect, vehicleModelSelect].forEach(select => {
+    if (select) {
+        select.addEventListener('change', function() {
+            if (this.value === "0" || this.value === "OTHERS") {
+                toggleOtherField(this.value);
+            }
+        });
+    }
+});
+// Monitor the container for any changes in violation dropdowns
+if (violationContainer) {
+    violationContainer.addEventListener('change', function(e) {
+        // Check if the element changed was actually a violation dropdown
+        if (e.target && e.target.name === 'violations[]') {
+            checkDuplicateViolations();
+        }
+    });
+}
 
     function showReviewStep() {
         Swal.fire({
@@ -845,21 +956,31 @@ const processChange = debounce(() => updateMapFromFields());
         });
     }
 
-    if (addBtn) {
-        addBtn.addEventListener('click', function() {
-            const firstRow = document.querySelector('.violation-row');
-            const newRow = firstRow.cloneNode(true);
-            newRow.querySelector('select').value = "";
-            const removeBtn = document.createElement('button');
-            removeBtn.type = "button";
-            removeBtn.className = "remove-btn";
-            removeBtn.innerHTML = "&times;";
-            removeBtn.onclick = () => newRow.remove();
-            newRow.appendChild(removeBtn);
-            violationContainer.appendChild(newRow);
-            attachViolationListener(newRow.querySelector('select[name="violations[]"]'));
-        });
-    }
+  if (addBtn) {
+    addBtn.addEventListener('click', function() {
+        const firstRow = document.querySelector('.violation-row');
+        if (!firstRow) return;
+
+        const newRow = firstRow.cloneNode(true);
+        
+        // Clear the value of the cloned dropdown
+        const newSelect = newRow.querySelector('select');
+        if (newSelect) newSelect.value = "";
+
+        // Add the remove button logic
+        const removeBtn = document.createElement('button');
+        removeBtn.type = "button";
+        removeBtn.className = "remove-btn"; // Make sure this class is in your CSS
+        removeBtn.innerHTML = "&times;";
+        removeBtn.onclick = () => {
+            newRow.remove();
+            checkDuplicateViolations(); // Re-check duplicates after removal
+        };
+
+        newRow.appendChild(removeBtn);
+        violationContainer.appendChild(newRow);
+    });
+}
 
     // 4. Save Logic
     if (saveBtn) {

@@ -21,116 +21,67 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $pdo->beginTransaction();
 
-        // 2. Handle Impoundable Checkbox
-        // Logic: If the 'impoundable' array exists and isn't empty, mark as 1
-        $is_impoundable = (!empty($_POST['impoundable'])) ? 1 : 0;
+        // 1. Capture the dropdown IDs
+// 1. Capture the Dropdown IDs (should be '0' if user is typing manually)
+$v_type_id  = $_POST['vehicle_type'] ?? null;
+$v_model_id = $_POST['vehicle_model'] ?? null;
 
-    // ===============================
-    // 1. INSERT MAIN CITATION
-    // ===============================
-    $sql = "INSERT INTO citations (
-        tct_no, driver_ln, driver_fn, driver_mi,
-        license_type, license_no,
-        driver_brgy, driver_muni, driver_prov,
-        plate_no, vehicle_type, vehicle_model,
-        owner_ln, owner_fn, owner_mi, owner_contact,
-        owner_brgy, owner_muni, owner_prov,
-        date_apprehension, time_apprehension,
-        apprehension_barangay, apprehension_municipality,
-        apprehension_province, officer_id
-    ) VALUES (
-        ?,?,?,?,?,?,
-        ?,?,?,?,?,
-        ?,?,?,?,?,
-        ?,?,?,?,?,
-        ?,?,?,?
-    )";
-
-    $stmt = $pdo->prepare($sql);
-
-    $stmt->execute([
-        strtoupper($_POST['tct_no'] ?? ''),
-        strtoupper($_POST['driver_ln'] ?? ''),
-        strtoupper($_POST['driver_fn'] ?? ''),
-        strtoupper($_POST['driver_mi'] ?? ''),
-        strtoupper($_POST['license_type'] ?? ''),
-        strtoupper($_POST['license_no'] ?? ''),
-        strtoupper($_POST['driver_brgy'] ?? ''),
-        strtoupper($_POST['driver_muni'] ?? ''),
-        strtoupper($_POST['driver_prov'] ?? ''),
-        strtoupper($_POST['plate_no'] ?? ''),
-        $_POST['vehicle_type'] ?? null,
-        $_POST['vehicle_model'] ?? null,
-        strtoupper($_POST['owner_ln'] ?? ''),
-        strtoupper($_POST['owner_fn'] ?? ''),
-        strtoupper($_POST['owner_mi'] ?? ''),
-        $_POST['owner_contact'] ?? '',
-        strtoupper($_POST['owner_brgy'] ?? ''),
-        strtoupper($_POST['owner_muni'] ?? ''),
-        strtoupper($_POST['owner_prov'] ?? ''),
-        $_POST['date_apprehension'] ?? null,
-        $_POST['time_apprehension'] ?? null,
-        strtoupper($_POST['app_barangay'] ?? ''),
-        strtoupper($_POST['app_municipality'] ?? ''),
-        strtoupper($_POST['app_province'] ?? ''),
-        $_POST['officer_id'] ?? null
-    ]);
-
-    $id = $pdo->lastInsertId();
-
-    // ===============================
-    // 2. INSERT VIOLATIONS
-    // ===============================
-$is_impoundable = 0;
-if (!empty($_POST['impoundable'])) {
-    $is_impoundable = 1; // Set to 1 if any checkbox was ticked
-}
-
+// 2. Capture the Manual Text from the inputs in add.php
+// We use strtoupper to keep your data uniform
+$v_type_other  = strtoupper(trim($_POST['vehicle_type_other'] ?? ''));
+$v_brand_other = strtoupper(trim($_POST['vehicle_brand_other'] ?? ''));
+$v_model_other = strtoupper(trim($_POST['vehicle_model_other'] ?? ''));
+// 3. Prepare and Execute
 $sql = "INSERT INTO citations (
-            tct_no, ..., apprehension_province, impoundable
-        ) VALUES (
-            ?, ..., ?, ?
-        )";
+    tct_no, driver_ln, driver_fn, driver_mi,
+    license_type, license_no, driver_brgy, driver_muni, driver_prov,
+    plate_no, vehicle_type, vehicle_model,
+    vehicle_type_other, vehicle_brand_other, vehicle_model_other,
+    owner_ln, owner_fn, owner_mi, owner_contact,
+    owner_brgy, owner_muni, owner_prov,
+    date_apprehension, time_apprehension,
+    apprehension_barangay, apprehension_municipality, apprehension_province, 
+    officer_id, impoundable, latitude, longitude
+) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
 
-// ... add the $is_impoundable value to your $stmt->execute array ...
+$stmt = $pdo->prepare($sql);
+$stmt->execute([
+    strtoupper($_POST['tct_no']), strtoupper($_POST['driver_ln']), strtoupper($_POST['driver_fn']), 
+    strtoupper($_POST['driver_mi']), strtoupper($_POST['license_type']), strtoupper($_POST['license_no']), 
+    strtoupper($_POST['driver_brgy']), strtoupper($_POST['driver_muni']), strtoupper($_POST['driver_prov']),
+    strtoupper($_POST['plate_no']), 
+    $v_type_id, $v_model_id, 
+    $v_type_other, $v_brand_other, $v_model_other, // MANUAL TEXT SAVED HERE
+    strtoupper($_POST['owner_ln']), strtoupper($_POST['owner_fn']), strtoupper($_POST['owner_mi']),
+    $_POST['owner_contact'], strtoupper($_POST['owner_brgy']), strtoupper($_POST['owner_muni']),
+    strtoupper($_POST['owner_prov']), $_POST['date_apprehension'], $_POST['time_apprehension'],
+    strtoupper($_POST['app_barangay']), strtoupper($_POST['app_municipality']), strtoupper($_POST['app_province']),
+    $_POST['officer_id'], ($_POST['impoundable'] ?? 'No'), $_POST['latitude'], $_POST['longitude']
+]);
+   if (!empty($_POST['violations'])) {
+            $tct_no = strtoupper($_POST['tct_no']); 
+            $violationSQL = "INSERT INTO ticket_violations (tct_no, violation_name) VALUES (?, ?)";
+            $violationStmt = $pdo->prepare($violationSQL);
 
-// --- 2. Insert into ticket_violations
-if (!empty($_POST['violations'])) {
-    // Use the actual TCT number provided in the form to link them
-    $tct_no = $_POST['tct_no']; 
+            foreach ($_POST['violations'] as $violation) {
+                if (empty($violation)) continue;
+                $violationStmt->execute([$tct_no, strtoupper($violation)]);
+            }
+        }
 
-    $violationSQL = "INSERT INTO ticket_violations (tct_no, violation_name) VALUES (?, ?)";
-    $violationStmt = $pdo->prepare($violationSQL);
+        $pdo->commit();
 
-    foreach ($_POST['violations'] as $index => $violation) {
-        if (empty($violation)) continue;
-
-        $violationStmt->execute([
-            $tct_no,
-            strtoupper($violation)
+        ob_clean();
+        echo json_encode([
+            'status' => 'success',
+            'message' => 'Record saved successfully!'
         ]);
+        exit;
+
+    } catch (Exception $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        ob_clean();
+        echo json_encode(['status' => 'error', 'message' => $e->getMessage()]);
+        exit;
     }
-}
-    $pdo->commit();
-
-    ob_clean();
-    echo json_encode([
-        'status' => 'success',
-        'message' => 'Record saved successfully!'
-    ]);
-    exit;
-
-} catch (Exception $e) {
-
-    if ($pdo->inTransaction()) {
-        $pdo->rollBack();
-    }
-
-    ob_clean();
-    echo json_encode([
-        'status' => 'error',
-        'message' => $e->getMessage()
-    ]);
-    exit;
-}
 }
