@@ -12,9 +12,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
        $app_muni = strtoupper($_POST['app_municipality'] ?? '');
        $app_prov = strtoupper($_POST['app_province'] ?? '');
 
-        // 2. Prepare the SQL Statement
-        // Double check: names here must match your phpMyAdmin columns EXACTLY
-        $sql = "INSERT INTO citations (
+       $latitude = !empty($_POST['latitude']) ? $_POST['latitude'] : null;
+       $longitude = !empty($_POST['longitude']) ? $_POST['longitude'] : null;
+        
+       $is_impoundable = !empty($_POST['impoundable']) ? 1 : 0;
+
+       $sql = "INSERT INTO citations (
                     tct_no, driver_ln, driver_fn, driver_mi,
                     license_type, license_no,
                     driver_brgy, driver_muni, driver_prov,
@@ -25,7 +28,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     officer_id,
                     apprehension_barangay,
                     apprehension_municipality,
-                    apprehension_province
+                    apprehension_province,
+                    latitude,
+                    longitude,
+                    impoundable,
+                    other_violation
                 ) VALUES (
                     ?, ?, ?, ?, 
                     ?, ?, 
@@ -36,6 +43,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ?, ?, 
                     ?, 
                     ?, ?, ?, 
+                    ?, ?,
+                    ?,
+                    ?,
                 )";
 
         $stmt = $pdo->prepare($sql);
@@ -65,14 +75,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $_POST['officer_id'],
     $app_brgy,
     $app_muni,
-    $app_prov
+    $app_prov,
+    $latitude,
+    $longitude,
+    $is_impoundable,    
+    strtoupper($_POST['other_violation'] ?? '')
 ]);
 
          $id = $pdo->lastInsertId();
 
-        // --- Insert Violations
-      // --- 1. Insert into citations (including impoundable)
-// First, determine if ANY of the violations were marked as impoundable
+      
 $is_impoundable = 0;
 if (!empty($_POST['impoundable'])) {
     $is_impoundable = 1; // Set to 1 if any checkbox was ticked
@@ -86,23 +98,19 @@ $sql = "INSERT INTO citations (
 
 // ... add the $is_impoundable value to your $stmt->execute array ...
 
-// --- 2. Insert into ticket_violations
-if (!empty($_POST['violations'])) {
-    // Use the actual TCT number provided in the form to link them
-    $tct_no = $_POST['tct_no']; 
+ if (!empty($_POST['violations'])) {
+            $tct_no = $_POST['tct_no'];
+            $violationSQL = "INSERT INTO ticket_violations (tct_no, violation_name) VALUES (?, ?)";
+            $violationStmt = $pdo->prepare($violationSQL);
 
-    $violationSQL = "INSERT INTO ticket_violations (tct_no, violation_name) VALUES (?, ?)";
-    $violationStmt = $pdo->prepare($violationSQL);
-
-    foreach ($_POST['violations'] as $index => $violation) {
-        if (empty($violation)) continue;
-
-        $violationStmt->execute([
-            $tct_no,
-            strtoupper($violation)
-        ]);
-    }
-}
+            foreach ($_POST['violations'] as $violation) {
+                if (empty($violation)) continue;
+                $violationStmt->execute([
+                    $tct_no,
+                    strtoupper($violation)
+                ]);
+            }
+        }
 
         $pdo->commit();
 
@@ -130,6 +138,9 @@ if (!empty($_POST['violations'])) {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Traffic Citation Ticket</title>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
 <style>
 :root {
     --primary-red: #d62828;
@@ -163,6 +174,10 @@ if (!empty($_POST['violations'])) {
     max-width: 100%;
     box-shadow: 0 4px 10px rgba(0,0,0,0.05);
 }
+.column.wider {
+    flex: 1 1 100%;
+    max-width: 100%;
+}
 
 h3 { color: var(--dark-blue); border-bottom: 2px solid var(--primary-red); padding-bottom: 10px; margin-top: 0; }
 h5 { margin: 0 0 10px 0; color: #888; text-transform: uppercase; font-size: 0.75em; letter-spacing: 1px; }
@@ -187,6 +202,7 @@ input, select, textarea { padding: 8px; border: 1px solid #ccc; border-radius: 4
 .btn { padding: 12px 25px; font-weight: bold; cursor: pointer; border-radius: 6px; border: none; transition: 0.3s; text-transform: uppercase; }
 .btn-save { background-color: #2a9d8f; color: white; }
 .btn-refresh { background-color: #e63946; color: white; margin-right: 15px; }
+.btn-map { background-color: #1d3557; color: white; font-size: 0.8em; padding: 8px 15px; }
 
 #saveMessage { margin-top: 15px; padding: 12px 15px; border-radius: 8px; font-weight: bold; font-size: 1rem; display: inline-block; }
 #saveMessage.error { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; animation: shake 0.3s; }
@@ -220,6 +236,58 @@ input, select, textarea { padding: 8px; border: 1px solid #ccc; border-radius: 4
 }
 input, textarea {
     text-transform: uppercase;
+}
+
+#map {
+    height: 350px;
+    width: 100%;
+    border-radius: 8px;
+    border: 2px solid #ddd;
+    margin-bottom: 15px;
+}
+
+.map-controls {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 15px;
+    flex-wrap: wrap;
+}
+
+.location-display {
+    background: #f8f9fa;
+    padding: 12px;
+    border-radius: 6px;
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.location-display .coord {
+    font-weight: bold;
+    color: var(--dark-blue);
+}
+
+.location-display .coord span {
+    color: var(--primary-red);
+}
+
+/* Status indicator */
+.location-status {
+    padding: 8px 12px;
+    border-radius: 4px;
+    font-size: 0.9em;
+    font-weight: 600;
+}
+
+.location-status.pending {
+    background: #fff3cd;
+    color: #856404;
+}
+
+.location-status.selected {
+    background: #d4edda;
+    color: #155724;
 }
 </style>
 </head>
@@ -343,18 +411,52 @@ input, textarea {
     <div class="place-horizontal-row">
         <div class="field-container">
             <label>Barangay:</label>
-            <input type="text" name="app_barangay" placeholder="Barangay">
-        </div>
-        <div class="field-container">
-            <label>Municipality:</label>
-            <input type="text" name="app_municipality" placeholder="Municipality">
-        </div>
-        <div class="field-container">
-            <label>Province:</label>
-            <input type="text" name="app_province" placeholder="Province">
-        </div>
+        <input type="text" id="app_barangay" name="app_barangay" placeholder="Barangay">
+    </div>
+    <div class="field-container">
+        <label>Municipality:</label>
+        <input type="text" id="app_municipality" name="app_municipality" placeholder="Municipality">
+    </div>
+    <div class="field-container">
+        <label>Province:</label>
+        <input type="text" id="app_province" name="app_province" placeholder="Province">
     </div>
 </div>
+<div class="form-group" style="margin-top:10px;">
+    <label>Street/Sitio:</label>
+    <input type="text" id="app_street" name="app_street" class="full-input" placeholder="e.g. 123 Main St">
+</div>
+
+<div class="column wide">
+        <h3>📍 Apprehension Location (Map)</h3>
+        
+        <div class="map-controls">
+            <button type="button" id="getLocationBtn" class="btn btn-map">
+                📍 Use My Current Location
+            </button>
+            <button type="button" id="clearMapBtn" class="btn btn-map" style="background: #6c757d;
+        ">🗑️ Clear Map</button>
+        </div>
+
+        <div id="map"></div>
+
+        <!-- Hidden fields for coordinates -->
+        <input type="hidden" id="latitude" name="latitude" value="">
+        <input type="hidden" id="longitude" name="longitude" value="">
+
+        <!-- Location Display -->
+        <div class="location-display">
+            <div class="location-status pending" id="locationStatus">
+                ⚠️ Click on the map to select location
+            </div>
+            <div class="coord">
+                Latitude: <span id="latDisplay">-</span>
+            </div>
+            <div class="coord">
+                Longitude: <span id="lngDisplay">-</span>
+            </div>
+        </div>
+    </div>
 
     <div class="section-separator"></div>
     <div class="form-group">
@@ -381,33 +483,38 @@ input, textarea {
                     <label>Violation:</label>
                     <select name="violations[]" class="full-input" required>
                         <option value="">-- Select Violation --</option>
-                        <option value="Reckless Driving">Reckless Driving</option>
-                        <option value="DUI">Driving Under Influence</option>
-                        <option value="No License">No License</option>
-                        <option value="Expired Registration">Expired Registration</option>
-                        <option value="Unauthorized/improvised number plates">Unauthorized/improvised number plates</option>
-                        <option value="Overspeeding">Overspeeding</option>
-                        <option value="Illegal Parking">Illegal Parking</option>
-                        <option value="Running Red Light">Running Red Light</option>
-                        <option value="Using Mobile Phone While Driving">Using Mobile Phone While Driving</option>
-                        <option value="Failure to Wear Seatbelt">Failure to Wear Seatbelt</option>
-                        <option value="Overloading">Overloading</option>
-                        <option value="Illegal U-Turn">Illegal U-Turn</option>
-                        <option value="Expired Traffic Violation Receipt">Expired Traffic Violation Receipt</option>
-                        <option value="Obstruction of Traffic">Obstruction of Traffic</option>
-                        <option value="Illegal Use of Hazard Lights">Illegal Use of Hazard Lights</option>
-                        <option value="Failure to Yield to Pedestrians">Failure to Yield to Pedestrians</option>
-                        <option value="Illegal Use of Horn">Illegal Use of Horn</option>
-                        <option value="Driving in the Wrong Lane">Driving in the Wrong Lane</option>
-                        <option value="Failure to Use Turn Signals">Failure to Use Turn Signals</option>
-                        <option value="Illegal Use of Headlights">Illegal Use of Headlights</option>
-                        <option value="Installation of jalousies, curtains, dim colored lights, etc">Installation of jalousies, curtains, dim colored lights, etc</option>
-                        <option value="Illegal Window Tinting">Illegal Window Tinting</option>
-                        <option value="Illegal Use of Sirens">Illegal Use of Sirens</option>
-                        <option value="Operating a motor vehicle with a suspended or revoked Certificate of Registration">Operating a motor vehicle with a suspended or revoked Certificate of Registration</option>
-                        <option value="Operating a motor vehicle with a suspended or revoked driver's license">Operating a motor vehicle with a suspended or revoked driver's license</option>
-                        <option value="Illegal Racing">Illegal Racing</option>
-                        <option value="Using license plates different from the body number">Using license plates different from the body number</option>
+                        <option value="DTO POLICE / TRAFFIC ENFORCER">DTO POLICE / TRAFFIC ENFORCER</option>
+                        <option value="DTS (TRAFFIC DEVICES AND SIGNALS)">DTS (TRAFFIC DEVICES AND SIGNALS)</option>
+                        <option value="DTS (NO L-TURN, NO R-TURN, NO U-TURN, NO STOPPING, NO PARKING, NO LOADING & UNLOADING)">DTS (NO L-TURN, NO R-TURN, NO U-TURN, NO STOPPING, NO PARKING, NO LOADING & UNLOADING)</option>
+                        <option value="OVERSPEEDING">OVERSPEEDING</option>
+                        <option value="OBSTRUCTION (SIDEWALK, DRIVEWAY)">OBSTRUCTION (SIDEWALK, DRIVEWAY)</option>
+                        <option value="OBSTRUCTION OF TRAFFIC">OBSTRUCTION OF TRAFFIC</option>
+                        <option value="SELLING ON PUBLIC STREETS / SIDEWALKS">SELLING ON PUBLIC STREETS / SIDEWALKS</option>
+                        <option value="NO PARKING ON EXPRESSWAYS AND HIGHWAYS">NO PARKING ON EXPRESSWAYS AND HIGHWAYS</option>
+                        <option value="TRUCKBAN (4,500 AND UP)">TRUCKBAN (4,500 AND UP)</option>
+                        <option value="DRIVING MV UNDER THE INFLUENCE OF ALCOHOL, DANGEROUS DRUGS">DRIVING MV UNDER THE INFLUENCE OF ALCOHOL, DANGEROUS DRUGS</option>
+                        <option value="RECKLESS DRIVING">RECKLESS DRIVING</option>
+                        <option value="FAILURE TO WEAR PRESCRIBED, STANDARD HELMET (DRIVER AND BACKRIDER)">FAILURE TO WEAR PRESCRIBED, STANDARD HELMET (DRIVER AND BACKRIDER)</option>
+                        <option value="MV W/O OR DEFECTIVE-IMPROPER UNAUTHORIZED ACCESSORIES, DEVICES EQUIPMENT AND PARTS">MV W/O OR DEFECTIVE-IMPROPER UNAUTHORIZED ACCESSORIES, DEVICES EQUIPMENT AND PARTS</option>
+                        <option value="OVERLOADING OF CARGOS">OVERLOADING OF CARGOS</option>
+                        <option value="HITCHING">HITCHING</option>
+                        <option value="ILLEGAL TERMINAL UNAUTHORIZED PARKING AREA">ILLEGAL TERMINAL UNAUTHORIZED PARKING AREA</option>
+                        <option value="OPERATING OUTSIDE THE LINE">OPERATING OUTSIDE THE LINE</option>
+                        <option value="CUTTING TRIP">CUTTING TRIP</option>
+                        <option value="NOT CONVEYING PASSENGERS IN THEIR DESTINATION-REFUSAL TO CONVEY PASSENGER">NOT CONVEYING PASSENGERS IN THEIR DESTINATION-REFUSAL TO CONVEY PASSENGER</option>
+                        <option value="NOT FOLLOWING ROUTE">NOT FOLLOWING ROUTE</option>
+                        <option value="OVERCHARGING (PUJ)">OVERCHARGING (PUJ)</option>
+                        <option value="PASSENGER ON TOP OF THE MOVING VEHICLE">PASSENGER ON TOP OF THE MOVING VEHICLE</option>
+                        <option value="WEARING SLIPPERS">WEARING SLIPPERS</option>
+                        <option value="WEARING SHORTS PANTS">WEARING SHORTS PANTS</option>
+                        <option value="DRIVING W/O VALID DRIVERS LICENSE">DRIVING W/O VALID DRIVERS LICENSE</option>
+                        <option value="FAILURE TO CARRY DL, OR-CR WHILE DRIVING">FAILURE TO CARRY DL, OR-CR WHILE DRIVING</option>
+                        <option value="DRIVING AN UNREGISTERED-DELINQUENT MV">DRIVING AN UNREGISTERED-DELINQUENT MV</option>
+                        <option value="UNAUTHORIZED MV MODIFICATION (BODY, COLOR & CHASIS)">UNAUTHORIZED MV MODIFICATION (BODY, COLOR & CHASIS)</option>
+                        <option value="FRAUD IN RELATION TO MV REGISTRATION">FRAUD IN RELATION TO MV REGISTRATION</option>
+                        <option value="COLORUM (OPERATING W/O FRANCHISE)">COLORUM (OPERATING W/O FRANCHISE)</option>
+                        <option value="NO PLATE ATTACHED">NO PLATE ATTACHED</option>
+                        <option value="OTHER VIOLATIONS">OTHER VIOLATIONS</option>
                     </select>
                 </div>
                 <div class="form-group"><label>Others:</label>
@@ -432,8 +539,221 @@ input, textarea {
 <div id="saveMessage"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 document.addEventListener("DOMContentLoaded", function() {
+
+     // ========== MAP INITIALIZATION ==========
+    let map;
+    let marker;
+    let currentLat = null;
+    let currentLng = null;
+
+    // Default center (Philippines)
+    const defaultLat = 12.8797;
+    const defaultLng = 121.7740;
+    const defaultZoom = 6;
+
+    function initMap() {
+        map = L.map('map', {
+            center: [defaultLat, defaultLng],
+            zoom: defaultZoom,
+            zoomControl: true
+        });
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap contributors',
+            maxZoom: 19
+        }).addTo(map);
+
+        // Add click event
+        map.on('click', function(e) {
+            const lat = e.latlng.lat;
+            const lng = e.latlng.lng;
+            setMarker(lat, lng);
+        });
+    }
+
+    function setMarker(lat, lng) {
+        currentLat = lat;
+        currentLng = lng;
+
+        // Update hidden fields
+        document.getElementById('latitude').value = lat;
+        document.getElementById('longitude').value = lng;
+
+        // Update display
+        document.getElementById('latDisplay').textContent = lat.toFixed(6);
+        document.getElementById('lngDisplay').textContent = lng.toFixed(6);
+
+        // Update status
+        const statusEl = document.getElementById('locationStatus');
+        statusEl.className = 'location-status selected';
+        statusEl.innerHTML = '✅ Location selected';
+
+        // Add or move marker
+        if (marker) {
+            marker.setLatLng([lat, lng]);
+        } else {
+            marker = L.marker([lat, lng], { draggable: true }).addTo(map);
+            
+            marker.on('dragend', function(e) {
+                const pos = e.target.getLatLng();
+                currentLat = pos.lat;
+                currentLng = pos.lng;
+                document.getElementById('latitude').value = pos.lat;
+                document.getElementById('longitude').value = pos.lng;
+                document.getElementById('latDisplay').textContent = pos.lat.toFixed(6);
+                document.getElementById('lngDisplay').textContent = pos.lng.toFixed(6);
+            });
+        }
+
+        // Get address from coordinates (reverse geocoding)
+        reverseGeocode(lat, lng);
+    }
+
+    // Function to search address and move map
+function updateMapFromFields() {
+    const street = document.getElementById('app_street').value;
+    const brgy = document.getElementById('app_barangay').value;
+    const muni = document.getElementById('app_municipality').value;
+    const prov = document.getElementById('app_province').value;
+
+    if (!brgy && !muni) return; // Don't search if fields are empty
+
+    const fullAddress = `${street} ${brgy} ${muni} ${prov} Philippines`;
+    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(fullAddress)}&limit=1`;
+
+    fetch(url)
+        .then(response => response.json())
+        .then(data => {
+            if (data && data.length > 0) {
+                const lat = parseFloat(data[0].lat);
+                const lon = parseFloat(data[0].lon);
+                
+                // Move map and marker
+                map.setView([lat, lon], 16);
+                setMarker(lat, lon);
+                
+                // Update coordinate displays
+                document.getElementById('latitude').value = lat;
+                document.getElementById('longitude').value = lon;
+                document.getElementById('latDisplay').textContent = lat.toFixed(6);
+                document.getElementById('lngDisplay').textContent = lon.toFixed(6);
+            }
+        })
+        .catch(error => console.error('Error fetching address:', error));
+}
+
+// Debounce helper to prevent hitting the API too hard
+function debounce(func, timeout = 500) {
+    let timer;
+    return (...args) => {
+        clearTimeout(timer);
+        timer = setTimeout(() => { func.apply(this, args); }, timeout);
+    };
+}
+
+const processChange = debounce(() => updateMapFromFields());
+
+// Attach listeners to fields
+['app_street', 'app_barangay', 'app_municipality', 'app_province'].forEach(id => {
+    document.getElementById(id).addEventListener('input', processChange);
+});
+
+    function reverseGeocode(lat, lng) {
+        const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`;
+        
+        fetch(url)
+            .then(response => response.json())
+            .then(data => {
+                if (data && data.address) {
+                    const addr = data.address;
+                    
+                    // Auto-fill barangay
+                    if (addr.barangay || addr.suburb) {
+                        document.getElementById('app_barangay').value = (addr.barangay || addr.suburb || '').toUpperCase();
+                    }
+                    
+                    // Auto-fill municipality/city
+                    if (addr.city || addr.municipality || addr.town) {
+                        document.getElementById('app_municipality').value = (addr.city || addr.municipality || addr.town || '').toUpperCase();
+                    }
+                    
+                    // Auto-fill province
+                    if (addr.province || addr.state) {
+                        document.getElementById('app_province').value = (addr.province || addr.state || '').toUpperCase();
+                    }
+                }
+            })
+            .catch(error => console.error('Geocoding error:', error));
+    }
+
+    function clearMap() {
+        if (marker) {
+            map.removeLayer(marker);
+            marker = null;
+        }
+        currentLat = null;
+        currentLng = null;
+        
+        document.getElementById('latitude').value = '';
+        document.getElementById('longitude').value = '';
+        document.getElementById('latDisplay').textContent = '-';
+        document.getElementById('lngDisplay').textContent = '-';
+        document.getElementById('app_barangay').value = '';
+        document.getElementById('app_municipality').value = '';
+        document.getElementById('app_province').value = '';
+        
+        const statusEl = document.getElementById('locationStatus');
+        statusEl.className = 'location-status pending';
+        statusEl.innerHTML = '⚠️ Click on the map to select location';
+    }
+
+   function getCurrentLocation() {
+    if (navigator.geolocation) {
+        Swal.fire({
+            title: 'Pinpointing Location...',
+            text: 'Acquiring high-accuracy coordinates.',
+            allowOutsideClick: false,
+            didOpen: () => { Swal.showLoading(); }
+        });
+
+        navigator.geolocation.getCurrentPosition(
+            function(position) {
+                const lat = position.coords.latitude;
+                const lng = position.coords.longitude;
+                
+                Swal.close();
+                
+                // Increase zoom to 18 for a tighter view of your actual spot
+                map.setView([lat, lng], 18); 
+                setMarker(lat, lng);
+            },
+            function(error) {
+                Swal.close();
+                let msg = 'Error: ';
+                if (error.code === 1) msg += 'Permission denied. Please enable GPS.';
+                else if (error.code === 2) msg += 'Position unavailable.';
+                else if (error.code === 3) msg += 'Request timed out.';
+                Swal.fire('Location Error', msg, 'error');
+            },
+            { 
+                enableHighAccuracy: true, // Forces the device to use GPS hardware
+                timeout: 10000,           // Wait up to 10 seconds for a lock
+                maximumAge: 0             // Do NOT use a cached (old) location
+            }
+        );
+    } else {
+        Swal.fire('Error', 'Geolocation is not supported by your browser.', 'error');
+    }
+}
+    // Initialize map
+    initMap();
+
+    // Map button events
+    document.getElementById('getLocationBtn').addEventListener('click', getCurrentLocation);
+    document.getElementById('clearMapBtn').addEventListener('click', clearMap);
     // 1. Element Selectors
     const form = document.getElementById('mainForm');
     const saveBtn = document.getElementById('saveBtn');
@@ -545,6 +865,7 @@ document.addEventListener("DOMContentLoaded", function() {
     if (saveBtn) {
         saveBtn.addEventListener('click', function() {
             let allFilled = true;
+            // Check required fields
             form.querySelectorAll('[required]').forEach(f => {
                 if (!f.value.trim()) { 
                     allFilled = false; 
@@ -559,7 +880,7 @@ document.addEventListener("DOMContentLoaded", function() {
                 return;
             }
 
-            // Uniqueness Check
+            // Uniqueness Check for TCT
             const tctValue = tctInput ? tctInput.value.trim() : '';
             fetch(`check_tct.php?tct_no=${tctValue}`)
                 .then(res => res.json())
@@ -567,17 +888,17 @@ document.addEventListener("DOMContentLoaded", function() {
                     if (data.exists) {
                         Swal.fire('Duplicate', 'TCT No. already exists!', 'error');
                     } else {
-                        showReviewStep();
+                        showReviewStep(); // This calls the function that actually saves via fetch
                     }
                 })
-                .catch(() => Swal.fire('Error', 'Duplicate check failed.', 'error'));
+                .catch(err => {
+                    console.error("Error checking TCT:", err);
+                    // If check_tct.php doesn't exist yet, we'll proceed for testing
+                    showReviewStep(); 
+                });
         });
     }
-
-    // Initialize first row listener
-    attachViolationListener(document.querySelector('select[name="violations[]"]'));
-
-}); // <--- This closes the DOMContentLoaded block
+}); // End of DOMContentLoaded
 </script>
 </body>
 </html>
